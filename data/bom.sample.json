@@ -1,0 +1,26 @@
+{
+  "workstations": {
+    "A-01": [
+      {
+        "material_id": "304L-DN500",
+        "material": "304L",
+        "nominal_diameter": "DN500",
+        "standard": "GB/T 14976",
+        "workstation": "A-01",
+        "batch_id": "BATCH-20260607-000000000001",
+        "expected_quantity": 2
+      }
+    ],
+    "A-02": [
+      {
+        "material_id": "Q235B-DN500",
+        "material": "Q235B",
+        "nominal_diameter": "DN500",
+        "standard": "GB/T 3091",
+        "workstation": "A-02",
+        "batch_id": "BATCH-20260607-000000000002",
+        "expected_quantity": 1
+      }
+    ]
+  }
+}

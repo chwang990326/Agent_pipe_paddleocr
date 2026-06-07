@@ -50,3 +50,5 @@ env/
 # --- Project Output & Logs ---
 results/
 *.log
+runtime/
+.pytest_cache/

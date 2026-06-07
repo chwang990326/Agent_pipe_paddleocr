@@ -13,3 +13,5 @@ lxml
 premailer
 openpyxl
 attrdict
+requests>=2.31.0
+Flask>=3.0.0
