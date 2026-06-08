@@ -66,6 +66,26 @@ class SemanticCorrectionResult:
 
 
 @dataclass
+class RetrievedDocument:
+    document_id: str
+    title: str
+    path: str
+    score: float
+    snippet: str
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class ProcessChangeReviewResult:
+    blocked: bool
+    action: str
+    confidence: float
+    reason_summary: str
+    citations: list[RetrievedDocument] = field(default_factory=list)
+    raw: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
 class AgentDecision:
     status: str
     action: str
@@ -92,6 +112,7 @@ class PipeInspectionState:
     parsed_diameter: str | None = None
     erp_record: ERPRecord | None = None
     semantic_correction: SemanticCorrectionResult | None = None
+    process_change_review: ProcessChangeReviewResult | None = None
     decision: AgentDecision | None = None
     trace: list[TraceEvent] = field(default_factory=list)
 

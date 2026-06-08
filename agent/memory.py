@@ -34,6 +34,10 @@ class AgentMemory:
         "semantic_corrected_text",
         "semantic_correction_applied",
         "semantic_correction_confidence",
+        "process_rag_blocked",
+        "process_rag_action",
+        "process_rag_confidence",
+        "process_rag_citations",
         "erp_material_id",
         "decision_status",
         "action",
@@ -105,6 +109,7 @@ class AgentMemory:
         ocr = state.ocr_result
         shape = state.shape_result
         correction = state.semantic_correction
+        process_review = state.process_change_review
         row: dict[str, Any] = {
             "timestamp": state.finished_at or now_iso(),
             "run_id": state.run_id,
@@ -117,6 +122,16 @@ class AgentMemory:
             "semantic_correction_applied": correction.applied if correction else "",
             "semantic_correction_confidence": (
                 f"{correction.confidence:.4f}" if correction else ""
+            ),
+            "process_rag_blocked": process_review.blocked if process_review else "",
+            "process_rag_action": process_review.action if process_review else "",
+            "process_rag_confidence": (
+                f"{process_review.confidence:.4f}" if process_review else ""
+            ),
+            "process_rag_citations": (
+                "; ".join(doc.title for doc in process_review.citations)
+                if process_review
+                else ""
             ),
             "erp_material_id": erp.material_id if erp else "",
             "decision_status": decision.status if decision else "",

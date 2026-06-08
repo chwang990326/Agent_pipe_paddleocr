@@ -63,8 +63,11 @@ triggered
        -> Tool_Semantic_OCR_Correction
        -> corrected_text accepted
        -> Tool_Query_ERP again
+  -> agentic rag:
+       Tool_Process_Change_RAG_Check reviews latest process-change documents
   -> decision:
        matched  -> Tool_Prepare_Assembly_Simulation -> finished
+       blocked_by_process_change -> Tool_Trigger_Alert -> suspended_for_human_review
        mismatch -> Tool_Trigger_Alert -> suspended_for_human_review
        duplicate -> skip -> finished
        error/low_confidence_without_safe_correction -> Tool_Trigger_Alert -> suspended_for_human_review
@@ -111,6 +114,11 @@ AGENT_LLM_API_KEY=
 AGENT_SEMANTIC_CORRECTION_ENABLED=1
 AGENT_SEMANTIC_CORRECTION_REQUIRED=1
 AGENT_SEMANTIC_CORRECTION_MIN_CONFIDENCE=0.70
+AGENT_PROCESS_RAG_ENABLED=1
+AGENT_PROCESS_RAG_REQUIRED=0
+AGENT_PROCESS_RAG_DOCS_DIR=data/process_docs
+AGENT_PROCESS_RAG_TOP_K=4
+AGENT_PROCESS_RAG_MIN_CONFIDENCE=0.70
 AGENT_ALERT_WEBHOOK=https://...
 AGENT_ALERT_CHANNEL=feishu
 AGENT_ALERT_DRY_RUN=0
@@ -131,6 +139,14 @@ $env:AGENT_LLM_ENDPOINT='mock://semantic-correction'
 $env:AGENT_MOCK_OCR_TEXT='0345B-DN5OO'
 $env:AGENT_MOCK_OCR_CONFIDENCE='0.62'
 python run_agent.py --workstation A-03 --component-id semantic-demo-001
+```
+
+工艺变更 RAG 拦截演示：
+
+```bash
+$env:AGENT_LLM_ENDPOINT='mock://process-rag'
+$env:AGENT_MOCK_OCR_TEXT='316L-DN500'
+python run_agent.py --workstation A-04 --component-id rag-demo-001
 ```
 
 启动 Agent API：

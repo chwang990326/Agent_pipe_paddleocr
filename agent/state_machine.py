@@ -11,8 +11,11 @@ from agent.schemas import (
     ERPRecord,
     OCRResult,
     PipeInspectionState,
+    ProcessChangeReviewResult,
+    RetrievedDocument,
     SemanticCorrectionResult,
     ShapeResult,
+    to_plain_data,
     new_id,
     now_iso,
 )
@@ -195,6 +198,17 @@ class PipeInspectionWorkflow:
 
     def _decide_and_act(self, state: PipeInspectionState, context: ToolContext, reason_summary: str) -> None:
         decision = self._compare_with_bom(state, reason_summary)
+        if decision.status == "matched":
+            process_review = self._review_process_changes(state, context)
+            if self._process_review_blocks_release(process_review):
+                decision = AgentDecision(
+                    status="blocked_by_process_change",
+                    action=process_review.action,
+                    reason_summary=process_review.reason_summary,
+                    alert_required=True,
+                    suspend_for_human=True,
+                )
+
         state.decision = decision
         state.add_trace("decision", "conditional_edge", {"decision": decision.status})
 
@@ -214,7 +228,7 @@ class PipeInspectionWorkflow:
         if decision.alert_required:
             alert_result = self.tools["Tool_Trigger_Alert"].run(
                 {
-                    "title": "Pipe BOM mismatch",
+                    "title": self._alert_title(decision),
                     "message": decision.reason_summary,
                     "details": {
                         "run_id": state.run_id,
@@ -222,6 +236,9 @@ class PipeInspectionWorkflow:
                         "actual_material_id": state.material_id,
                         "expected_material_id": state.erp_record.material_id if state.erp_record else "",
                         "workstation": state.workstation,
+                        "process_change_review": to_plain_data(state.process_change_review)
+                        if state.process_change_review
+                        else {},
                     },
                 },
                 context,
@@ -284,6 +301,98 @@ class PipeInspectionWorkflow:
             alert_required=False,
             suspend_for_human=False,
         )
+
+    def _review_process_changes(
+        self,
+        state: PipeInspectionState,
+        context: ToolContext,
+    ) -> ProcessChangeReviewResult | None:
+        if not self.config.process_rag_enabled:
+            return None
+
+        if not self.config.llm_endpoint:
+            message = "Process-change RAG review was triggered but AGENT_LLM_ENDPOINT is not configured"
+            if self.config.process_rag_required:
+                raise RuntimeError(message)
+            state.add_trace(
+                "reasoning",
+                "process_change_rag_skipped",
+                {"reason": message, "required": False},
+            )
+            return None
+
+        state.add_trace(
+            "reasoning",
+            "Tool_Process_Change_RAG_Check",
+            {
+                "material_id": state.material_id,
+                "material": state.parsed_material,
+                "diameter": state.parsed_diameter,
+                "workstation": state.workstation,
+            },
+        )
+        rag_result = self.tools["Tool_Process_Change_RAG_Check"].run(
+            {
+                "task": state.task,
+                "workstation": state.workstation,
+                "material_id": state.material_id,
+                "material": state.parsed_material,
+                "diameter": state.parsed_diameter,
+                "erp_record": to_plain_data(state.erp_record) if state.erp_record else {},
+            },
+            context,
+        )
+        if not rag_result.ok:
+            raise RuntimeError(f"process-change RAG review failed: {rag_result.error}")
+
+        payload = dict(rag_result.data)
+        payload.pop("retrieved_count", None)
+        state.process_change_review = self._process_review_from_payload(payload)
+        state.add_trace(
+            "reasoning",
+            "process_change_rag_result",
+            {
+                "blocked": state.process_change_review.blocked,
+                "action": state.process_change_review.action,
+                "confidence": state.process_change_review.confidence,
+                "citations": [
+                    doc.title for doc in state.process_change_review.citations
+                ],
+            },
+        )
+        return state.process_change_review
+
+    def _process_review_from_payload(self, payload: dict) -> ProcessChangeReviewResult:
+        citations = []
+        for item in payload.get("citations") or []:
+            if isinstance(item, RetrievedDocument):
+                citations.append(item)
+            elif isinstance(item, dict):
+                citations.append(RetrievedDocument(**item))
+        return ProcessChangeReviewResult(
+            blocked=bool(payload.get("blocked")),
+            action=str(payload.get("action") or ""),
+            confidence=float(payload.get("confidence") or 0.0),
+            reason_summary=str(payload.get("reason_summary") or ""),
+            citations=citations,
+            raw=payload.get("raw") if isinstance(payload.get("raw"), dict) else {},
+        )
+
+    def _process_review_blocks_release(
+        self,
+        review: ProcessChangeReviewResult | None,
+    ) -> bool:
+        return bool(
+            review
+            and review.blocked
+            and review.confidence >= self.config.process_rag_min_confidence
+        )
+
+    @staticmethod
+    def _alert_title(decision: AgentDecision) -> str:
+        if decision.status == "blocked_by_process_change":
+            return "Pipe process-change intervention"
+        return "Pipe BOM mismatch"
 
     def _needs_semantic_correction(self, state: PipeInspectionState) -> bool:
         ocr_confidence = state.ocr_result.confidence if state.ocr_result else 0.0

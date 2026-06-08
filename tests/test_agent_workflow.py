@@ -30,6 +30,11 @@ def make_config(tmp_path: Path, mock_text: str = "304L-DN500") -> AgentConfig:
         semantic_correction_enabled=True,
         semantic_correction_required=False,
         semantic_correction_min_confidence=0.70,
+        process_rag_enabled=False,
+        process_rag_required=False,
+        process_rag_docs_dir=project_root / "data" / "process_docs",
+        process_rag_top_k=4,
+        process_rag_min_confidence=0.70,
         http_timeout_seconds=1.0,
         min_ocr_confidence=0.75,
         mock_ocr_text=mock_text,
@@ -124,6 +129,29 @@ class AgentWorkflowTests(unittest.TestCase):
                 client._chat_completions_url(),
                 "https://api.deepseek.com/chat/completions",
             )
+
+    def test_process_change_rag_blocks_bom_matched_pipe(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            config = make_config(Path(tmp), mock_text="316L-DN500")
+            config = AgentConfig(
+                **{
+                    **config.__dict__,
+                    "llm_endpoint": "mock://process-rag",
+                    "process_rag_enabled": True,
+                }
+            )
+
+            state = build_default_agent(config).inspect_pipe(
+                task="inspect 7 dock seawater cooling pipeline",
+                workstation="A-04",
+                component_id="sensor-005",
+                batch_id="BATCH-20260608-000000000004",
+            )
+
+            self.assertEqual(state.erp_record.material_id, "316L-DN500")
+            self.assertTrue(state.process_change_review.blocked)
+            self.assertEqual(state.decision.status, "blocked_by_process_change")
+            self.assertEqual(state.decision.action, "send_to_reinspection")
 
 
 if __name__ == "__main__":

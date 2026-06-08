@@ -32,6 +32,17 @@
         "batch_id": "BATCH-20260607-000000000003",
         "expected_quantity": 1
       }
+    ],
+    "A-04": [
+      {
+        "material_id": "316L-DN500",
+        "material": "316L",
+        "nominal_diameter": "DN500",
+        "standard": "GB/T 14976",
+        "workstation": "A-04",
+        "batch_id": "BATCH-20260608-000000000004",
+        "expected_quantity": 1
+      }
     ]
   }
 }

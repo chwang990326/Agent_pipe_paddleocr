@@ -53,6 +53,11 @@ class AgentConfig:
     semantic_correction_enabled: bool
     semantic_correction_required: bool
     semantic_correction_min_confidence: float
+    process_rag_enabled: bool
+    process_rag_required: bool
+    process_rag_docs_dir: Path
+    process_rag_top_k: int
+    process_rag_min_confidence: float
     http_timeout_seconds: float
     min_ocr_confidence: float
     mock_ocr_text: str
@@ -96,6 +101,13 @@ class AgentConfig:
                 "AGENT_SEMANTIC_CORRECTION_MIN_CONFIDENCE",
                 0.70,
             ),
+            process_rag_enabled=_bool_from_env("AGENT_PROCESS_RAG_ENABLED", True),
+            process_rag_required=_bool_from_env("AGENT_PROCESS_RAG_REQUIRED", False),
+            process_rag_docs_dir=Path(
+                os.getenv("AGENT_PROCESS_RAG_DOCS_DIR", project_root / "data" / "process_docs")
+            ).resolve(),
+            process_rag_top_k=int(os.getenv("AGENT_PROCESS_RAG_TOP_K", "4")),
+            process_rag_min_confidence=_float_from_env("AGENT_PROCESS_RAG_MIN_CONFIDENCE", 0.70),
             http_timeout_seconds=_float_from_env("AGENT_HTTP_TIMEOUT_SECONDS", 10.0),
             min_ocr_confidence=_float_from_env("AGENT_MIN_OCR_CONFIDENCE", 0.75),
             mock_ocr_text=os.getenv("AGENT_MOCK_OCR_TEXT", "304L-DN500"),
