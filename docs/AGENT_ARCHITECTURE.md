@@ -2,9 +2,9 @@
 
 ## 目标
 
-本项目从“被动 OCR/视觉识别接口”升级为“主动决策与行动的工业 Agent”。PaddleOCR 与形状识别能力不再直接面向业务流程，而是作为 Controller Agent 可调用的工具，由 Agent 自主完成感知、核验、决策、告警、日志持久化。
+本项目从“被动 OCR/视觉识别接口”升级为“主动决策与行动的工业 Agent”。PaddleOCR 与形状识别能力不再直接面向业务流程，而是作为 Controller Agent 可调用的工具，由 Agent 自主完成感知、语义纠错、核验、决策、告警、日志持久化。
 
-## 目录规划
+## 核心目录
 
 ```text
 agent/
@@ -16,18 +16,18 @@ agent/
   config.py                # 环境变量配置
   tools/
     perception.py          # Tool_Read_Pipe_Text / Tool_Analyze_Shape
+    reasoning.py           # Tool_Semantic_OCR_Correction
     action.py              # Tool_Query_ERP / Tool_Trigger_Alert / 仿真预备
     registry.py            # 工具注册表
   integrations/
     ocr_client.py          # Jetson TX2 OCR 服务适配器
     shape_client.py        # 形状识别服务适配器
+    llm_client.py          # LLM 语义 OCR 纠错适配器
     erp_client.py          # ERP/MES 或本地 BOM 适配器
     alert_client.py        # 飞书/钉钉/通用 Webhook 适配器
     simulation_client.py   # 机械臂或装配仿真接口适配器
 data/
   bom.sample.json          # 本地 BOM 样例
-docs/
-  AGENT_ARCHITECTURE.md    # 当前架构说明
 run_agent.py               # 单次轨迹 CLI
 agent_api.py               # Flask Agent API
 ```
@@ -37,15 +37,18 @@ agent_api.py               # Flask Agent API
 ## 四大组件
 
 1. 认知中枢：`ControllerBrain` 与 `PipeInspectionWorkflow`
-   当前提供确定性规则大脑，便于离线调试。后续接入本地 Qwen-14B 时，建议提供 OpenAI-compatible HTTP 服务，并让 `brain.py` 只输出结构化计划和推理摘要，不把底层工具耦合进 LLM 调用。
+   当前负责状态机编排、工具选择、语义纠错触发条件、BOM 核验和行动分支。LLM 不替代全部规则，而是在 OCR 边界缺陷处承担必须使用语言模型的语义纠错能力。
 
 2. 感知工具箱：`Tool_Read_Pipe_Text`、`Tool_Analyze_Shape`
    OCR 工具可通过 `AGENT_OCR_ENDPOINT` 调用 Jetson TX2 上的 PaddleOCR Flask 服务。未配置 endpoint 时会返回 mock 结果，方便先跑通 Agent 闭环。
 
-3. 行动工具箱：`Tool_Query_ERP`、`Tool_Trigger_Alert`、`Tool_Prepare_Assembly_Simulation`
+3. 推理工具箱：`Tool_Semantic_OCR_Correction`
+   当 OCR 置信度低于阈值，或 ERP/BOM 查无精确物料时，Agent 会把原始 OCR、工位、任务、形状上下文和 BOM 候选项发给 LLM。LLM 必须返回结构化 JSON：是否应用纠错、纠正后的物料号、置信度、解释摘要和候选项。纠错置信度达标后，Agent 才会用纠正后的物料号重新查 BOM。
+
+4. 行动工具箱：`Tool_Query_ERP`、`Tool_Trigger_Alert`、`Tool_Prepare_Assembly_Simulation`
    ERP/MES 未接入时读取 `data/bom.sample.json`。告警默认 dry-run，不会真正发送；配置飞书或钉钉 webhook 后可切换为实发。
 
-4. 记忆与持久化：`AgentMemory`
+5. 记忆与持久化：`AgentMemory`
    短期记忆记录当前批次/工位识别过的构件签名，避免同一构件被重复识别和重复报错。长期数据写入 JSONL 轨迹和 CSV 批次报表。
 
 ## ReAct 状态机轨迹
@@ -55,34 +58,76 @@ triggered
   -> perception: Tool_Read_Pipe_Text, Tool_Analyze_Shape
   -> reasoning: ControllerBrain 生成计划与推理摘要
   -> validation: Tool_Query_ERP
+  -> reasoning conditional:
+       low_confidence or erp_not_found
+       -> Tool_Semantic_OCR_Correction
+       -> corrected_text accepted
+       -> Tool_Query_ERP again
   -> decision:
        matched  -> Tool_Prepare_Assembly_Simulation -> finished
        mismatch -> Tool_Trigger_Alert -> suspended_for_human_review
        duplicate -> skip -> finished
-       error/low_confidence -> Tool_Trigger_Alert -> suspended_for_human_review
+       error/low_confidence_without_safe_correction -> Tool_Trigger_Alert -> suspended_for_human_review
 ```
+
+## 语义级 OCR 纠错示例
+
+现场 OCR 原始输出：
+
+```text
+0345B-DN5OO
+```
+
+Agent 首次查询 BOM 发现查无精确物料，同时 OCR 置信度低于阈值，于是调用 LLM。LLM 结合候选 BOM、冶金材料牌号、船舶装配上下文和视觉易混字符规则，返回：
+
+```json
+{
+  "applied": true,
+  "corrected_text": "Q345B-DN500",
+  "confidence": 0.86,
+  "reason_summary": "0345B 不符合常见钢材牌号；结合 Q/0 与 O/0 易混、BOM 候选和 DN 管径规范，修正为 Q345B-DN500。",
+  "candidates_considered": ["Q345B-DN500"]
+}
+```
+
+Agent 只有在 `confidence >= AGENT_SEMANTIC_CORRECTION_MIN_CONFIDENCE` 时才应用纠错，然后用 `Q345B-DN500` 重新查 BOM。
 
 ## CSV 工程规范
 
 `memory.py` 导出的 CSV 使用 `utf-8-sig`、全字段引用，并对所有导出字段加文本保护前缀，默认是制表符 `\t`。这样批次时间戳、超长物料 ID、批次号在 Office 中打开时会被当作文本，不会被自动转换成科学计数法或日期格式。前缀可通过 `AGENT_CSV_TEXT_GUARD` 调整。
 
-## 需要准备或确认的外部条件
+## 生产接入配置
 
-- Jetson TX2 OCR 服务地址：例如 `http://tx2-ip:8090/ocr`，配置到 `AGENT_OCR_ENDPOINT`。
-- 形状识别服务地址：如已有模型服务，配置到 `AGENT_SHAPE_ENDPOINT`；没有时先使用 mock 或从 `shibie.py` 抽服务。
-- ERP/MES 查询接口：确认请求字段、鉴权方式、BOM 返回格式，配置到 `AGENT_ERP_ENDPOINT`。
-- 告警 Webhook：飞书或钉钉机器人 webhook，配置 `AGENT_ALERT_WEBHOOK` 和 `AGENT_ALERT_CHANNEL=feishu|dingtalk`。
-- 机械臂/装配仿真预备接口：配置 `AGENT_SIMULATION_ENDPOINT`。
-- 构件唯一 ID 来源：建议由产线传感器、PLC 事件或视觉跟踪模块提供 `component_id`，去重会更可靠。
-- 本地 LLM 服务：建议部署 Qwen 工业微调模型并提供结构化 JSON 输出接口，后续接入 `brain.py`。
+```bash
+AGENT_OCR_ENDPOINT=http://tx2-ip:8090/ocr
+AGENT_SHAPE_ENDPOINT=http://shape-service/analyze
+AGENT_ERP_ENDPOINT=http://erp-service/query-bom
+AGENT_LLM_ENDPOINT=http://qwen-service:8000
+AGENT_LLM_MODEL=qwen-14b-industrial
+AGENT_SEMANTIC_CORRECTION_ENABLED=1
+AGENT_SEMANTIC_CORRECTION_REQUIRED=1
+AGENT_SEMANTIC_CORRECTION_MIN_CONFIDENCE=0.70
+AGENT_ALERT_WEBHOOK=https://...
+AGENT_ALERT_CHANNEL=feishu
+AGENT_ALERT_DRY_RUN=0
+```
 
 ## 快速运行
+
+普通一致路径：
 
 ```bash
 python run_agent.py --workstation A-01 --component-id sensor-001
 ```
 
-返回 `matched` 表示 BOM 校验通过；把 `--workstation A-02` 与默认 mock OCR `304L-DN500` 搭配运行，会触发 mismatch 路径。
+语义纠错演示：
+
+```bash
+$env:AGENT_LLM_ENDPOINT='mock://semantic-correction'
+$env:AGENT_MOCK_OCR_TEXT='0345B-DN5OO'
+$env:AGENT_MOCK_OCR_CONFIDENCE='0.62'
+python run_agent.py --workstation A-03 --component-id semantic-demo-001
+```
 
 启动 Agent API：
 

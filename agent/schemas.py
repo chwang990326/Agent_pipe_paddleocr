@@ -54,6 +54,18 @@ class ERPRecord:
 
 
 @dataclass
+class SemanticCorrectionResult:
+    original_text: str
+    corrected_text: str
+    confidence: float
+    applied: bool
+    source: str
+    reason_summary: str
+    candidates_considered: list[str] = field(default_factory=list)
+    raw: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
 class AgentDecision:
     status: str
     action: str
@@ -79,6 +91,7 @@ class PipeInspectionState:
     parsed_material: str | None = None
     parsed_diameter: str | None = None
     erp_record: ERPRecord | None = None
+    semantic_correction: SemanticCorrectionResult | None = None
     decision: AgentDecision | None = None
     trace: list[TraceEvent] = field(default_factory=list)
 

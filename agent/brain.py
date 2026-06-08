@@ -35,6 +35,7 @@ class ControllerBrain:
             steps=[
                 "read_pipe_text",
                 "analyze_shape",
+                "semantic_ocr_correction_when_needed",
                 "query_erp",
                 "decide_match_or_alert",
             ],

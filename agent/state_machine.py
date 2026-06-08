@@ -11,6 +11,7 @@ from agent.schemas import (
     ERPRecord,
     OCRResult,
     PipeInspectionState,
+    SemanticCorrectionResult,
     ShapeResult,
     new_id,
     now_iso,
@@ -52,6 +53,16 @@ class PipeInspectionWorkflow:
         try:
             state.add_trace("triggered", "sensor_event_received", {"task": task})
             self._perceive(state, context)
+
+            plan = self.brain.plan(state)
+            state.add_trace(
+                "reasoning",
+                "brain_plan_created",
+                {"steps": plan.steps, "reason_summary": plan.reason_summary},
+            )
+
+            self._validate_with_erp(state, context)
+            self._semantic_correct_when_needed(state, context)
             signature = self._signature(state)
             if self.memory.is_duplicate(signature):
                 state.decision = AgentDecision(
@@ -62,14 +73,6 @@ class PipeInspectionWorkflow:
                 state.add_trace("finished", "duplicate_skipped", {"signature": signature})
                 return self._finish(state)
 
-            plan = self.brain.plan(state)
-            state.add_trace(
-                "reasoning",
-                "brain_plan_created",
-                {"steps": plan.steps, "reason_summary": plan.reason_summary},
-            )
-
-            self._validate_with_erp(state, context)
             self._decide_and_act(state, context, plan.reason_summary)
             self.memory.remember(signature, state)
             return self._finish(state)
@@ -118,6 +121,78 @@ class PipeInspectionWorkflow:
             raise RuntimeError(f"ERP tool failed: {erp_result.error}")
         state.erp_record = ERPRecord(**erp_result.data)
 
+    def _semantic_correct_when_needed(self, state: PipeInspectionState, context: ToolContext) -> None:
+        if not self.config.semantic_correction_enabled:
+            return
+
+        if not self._needs_semantic_correction(state):
+            return
+
+        if not self.config.llm_endpoint:
+            message = "Semantic OCR correction was triggered but AGENT_LLM_ENDPOINT is not configured"
+            if self.config.semantic_correction_required:
+                raise RuntimeError(message)
+            state.add_trace(
+                "reasoning",
+                "semantic_correction_skipped",
+                {"reason": message, "required": False},
+            )
+            return
+
+        candidate_records = self._candidate_records(state)
+        state.add_trace(
+            "reasoning",
+            "Tool_Semantic_OCR_Correction",
+            {
+                "raw_text": state.ocr_result.text if state.ocr_result else "",
+                "trigger": self._semantic_correction_trigger(state),
+                "candidate_count": len(candidate_records),
+            },
+        )
+        correction_result = self.tools["Tool_Semantic_OCR_Correction"].run(
+            {
+                "raw_text": state.ocr_result.text if state.ocr_result else "",
+                "ocr_confidence": state.ocr_result.confidence if state.ocr_result else 0.0,
+                "workstation": state.workstation,
+                "task": state.task,
+                "candidate_records": candidate_records,
+                "shape_context": {
+                    "label": state.shape_result.label if state.shape_result else None,
+                    "diameter": state.shape_result.diameter if state.shape_result else None,
+                    "flange_type": state.shape_result.flange_type if state.shape_result else None,
+                },
+            },
+            context,
+        )
+        if not correction_result.ok:
+            raise RuntimeError(f"semantic OCR correction failed: {correction_result.error}")
+
+        state.semantic_correction = SemanticCorrectionResult(**correction_result.data)
+        state.add_trace(
+            "reasoning",
+            "semantic_correction_result",
+            {
+                "applied": state.semantic_correction.applied,
+                "corrected_text": state.semantic_correction.corrected_text,
+                "confidence": state.semantic_correction.confidence,
+                "reason_summary": state.semantic_correction.reason_summary,
+            },
+        )
+
+        if not self._can_apply_correction(state.semantic_correction):
+            return
+
+        parsed = parse_pipe_text(state.semantic_correction.corrected_text)
+        state.material_id = parsed["material_id"]
+        state.parsed_material = parsed["material"]
+        state.parsed_diameter = parsed["diameter"]
+        state.add_trace(
+            "reasoning",
+            "semantic_correction_applied",
+            {"parsed": parsed},
+        )
+        self._validate_with_erp(state, context)
+
     def _decide_and_act(self, state: PipeInspectionState, context: ToolContext, reason_summary: str) -> None:
         decision = self._compare_with_bom(state, reason_summary)
         state.decision = decision
@@ -155,7 +230,7 @@ class PipeInspectionWorkflow:
 
     def _compare_with_bom(self, state: PipeInspectionState, reason_summary: str) -> AgentDecision:
         ocr_confidence = state.ocr_result.confidence if state.ocr_result else 0.0
-        if ocr_confidence < self.config.min_ocr_confidence:
+        if ocr_confidence < self.config.min_ocr_confidence and not self._applied_semantic_correction(state):
             return AgentDecision(
                 status="needs_review",
                 action="suspend_for_human_review",
@@ -209,6 +284,48 @@ class PipeInspectionWorkflow:
             alert_required=False,
             suspend_for_human=False,
         )
+
+    def _needs_semantic_correction(self, state: PipeInspectionState) -> bool:
+        ocr_confidence = state.ocr_result.confidence if state.ocr_result else 0.0
+        return (
+            ocr_confidence < self.config.min_ocr_confidence
+            or self._erp_exact_match(state) is False
+        )
+
+    def _semantic_correction_trigger(self, state: PipeInspectionState) -> str:
+        triggers = []
+        ocr_confidence = state.ocr_result.confidence if state.ocr_result else 0.0
+        if ocr_confidence < self.config.min_ocr_confidence:
+            triggers.append("low_ocr_confidence")
+        if self._erp_exact_match(state) is False:
+            triggers.append("erp_material_not_found")
+        return ",".join(triggers)
+
+    def _erp_exact_match(self, state: PipeInspectionState) -> bool | None:
+        if not state.erp_record:
+            return None
+        bom_match = state.erp_record.raw.get("bom_match")
+        return bom_match if isinstance(bom_match, bool) else None
+
+    def _candidate_records(self, state: PipeInspectionState) -> list[dict]:
+        if not state.erp_record:
+            return []
+        candidates = state.erp_record.raw.get("candidate_records")
+        if isinstance(candidates, list):
+            return [item for item in candidates if isinstance(item, dict)]
+        return [state.erp_record.raw] if state.erp_record.raw else []
+
+    def _can_apply_correction(self, correction: SemanticCorrectionResult) -> bool:
+        return (
+            correction.applied
+            and correction.confidence >= self.config.semantic_correction_min_confidence
+            and normalize_material_id(correction.corrected_text)
+            != normalize_material_id(correction.original_text)
+        )
+
+    def _applied_semantic_correction(self, state: PipeInspectionState) -> bool:
+        correction = state.semantic_correction
+        return bool(correction and self._can_apply_correction(correction))
 
     def _signature(self, state: PipeInspectionState) -> str:
         if state.component_id and not state.component_id.startswith("component-"):

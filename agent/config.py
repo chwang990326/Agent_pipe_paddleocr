@@ -50,6 +50,9 @@ class AgentConfig:
     llm_endpoint: str | None
     llm_model: str
     llm_api_key: str | None
+    semantic_correction_enabled: bool
+    semantic_correction_required: bool
+    semantic_correction_min_confidence: float
     http_timeout_seconds: float
     min_ocr_confidence: float
     mock_ocr_text: str
@@ -80,6 +83,12 @@ class AgentConfig:
             llm_endpoint=os.getenv("AGENT_LLM_ENDPOINT"),
             llm_model=os.getenv("AGENT_LLM_MODEL", "qwen-14b-industrial"),
             llm_api_key=os.getenv("AGENT_LLM_API_KEY"),
+            semantic_correction_enabled=_bool_from_env("AGENT_SEMANTIC_CORRECTION_ENABLED", True),
+            semantic_correction_required=_bool_from_env("AGENT_SEMANTIC_CORRECTION_REQUIRED", False),
+            semantic_correction_min_confidence=_float_from_env(
+                "AGENT_SEMANTIC_CORRECTION_MIN_CONFIDENCE",
+                0.70,
+            ),
             http_timeout_seconds=_float_from_env("AGENT_HTTP_TIMEOUT_SECONDS", 10.0),
             min_ocr_confidence=_float_from_env("AGENT_MIN_OCR_CONFIDENCE", 0.75),
             mock_ocr_text=os.getenv("AGENT_MOCK_OCR_TEXT", "304L-DN500"),

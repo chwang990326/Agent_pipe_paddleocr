@@ -50,11 +50,13 @@ class ERPClient:
             if normalize_material_id(item.get("material_id")) == normalized_actual:
                 record = self._record_from_dict(item, workstation=workstation)
                 record.raw["bom_match"] = True
+                record.raw["candidate_records"] = records
                 return record
 
         record = self._record_from_dict(records[0], workstation=workstation)
         record.raw["bom_match"] = False
         record.raw["candidate_count"] = len(records)
+        record.raw["candidate_records"] = records
         return record
 
     @staticmethod

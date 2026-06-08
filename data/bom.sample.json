@@ -21,6 +21,17 @@
         "batch_id": "BATCH-20260607-000000000002",
         "expected_quantity": 1
       }
+    ],
+    "A-03": [
+      {
+        "material_id": "Q345B-DN500",
+        "material": "Q345B",
+        "nominal_diameter": "DN500",
+        "standard": "GB/T 1591",
+        "workstation": "A-03",
+        "batch_id": "BATCH-20260607-000000000003",
+        "expected_quantity": 1
+      }
     ]
   }
 }

@@ -26,6 +26,9 @@ def make_config(tmp_path: Path, mock_text: str = "304L-DN500") -> AgentConfig:
         llm_endpoint=None,
         llm_model="qwen-14b-industrial",
         llm_api_key=None,
+        semantic_correction_enabled=True,
+        semantic_correction_required=False,
+        semantic_correction_min_confidence=0.70,
         http_timeout_seconds=1.0,
         min_ocr_confidence=0.75,
         mock_ocr_text=mock_text,
@@ -79,6 +82,28 @@ class AgentWorkflowTests(unittest.TestCase):
             self.assertTrue(rows[0]["timestamp"].startswith("\t"))
             self.assertTrue(rows[0]["batch_id"].startswith("\t"))
             self.assertTrue(rows[0]["material_id"].startswith("\t"))
+
+    def test_llm_semantic_correction_recovers_ocr_confusion(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            config = make_config(Path(tmp), mock_text="0345B-DN5OO")
+            config = AgentConfig(
+                **{
+                    **config.__dict__,
+                    "llm_endpoint": "mock://semantic-correction",
+                    "mock_ocr_confidence": 0.62,
+                }
+            )
+
+            state = build_default_agent(config).inspect_pipe(
+                task="inspect low confidence OCR",
+                workstation="A-03",
+                component_id="sensor-004",
+            )
+
+            self.assertEqual(state.semantic_correction.corrected_text, "Q345B-DN500")
+            self.assertTrue(state.semantic_correction.applied)
+            self.assertEqual(state.material_id, "Q345B-DN500")
+            self.assertEqual(state.decision.status, "matched")
 
 
 if __name__ == "__main__":

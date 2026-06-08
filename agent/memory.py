@@ -30,6 +30,10 @@ class AgentMemory:
         "component_id",
         "workstation",
         "material_id",
+        "original_ocr_text",
+        "semantic_corrected_text",
+        "semantic_correction_applied",
+        "semantic_correction_confidence",
         "erp_material_id",
         "decision_status",
         "action",
@@ -100,6 +104,7 @@ class AgentMemory:
         erp = state.erp_record
         ocr = state.ocr_result
         shape = state.shape_result
+        correction = state.semantic_correction
         row: dict[str, Any] = {
             "timestamp": state.finished_at or now_iso(),
             "run_id": state.run_id,
@@ -107,6 +112,12 @@ class AgentMemory:
             "component_id": state.component_id,
             "workstation": state.workstation,
             "material_id": state.material_id,
+            "original_ocr_text": correction.original_text if correction else (ocr.text if ocr else ""),
+            "semantic_corrected_text": correction.corrected_text if correction else "",
+            "semantic_correction_applied": correction.applied if correction else "",
+            "semantic_correction_confidence": (
+                f"{correction.confidence:.4f}" if correction else ""
+            ),
             "erp_material_id": erp.material_id if erp else "",
             "decision_status": decision.status if decision else "",
             "action": decision.action if decision else "",
