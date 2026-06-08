@@ -53,13 +53,13 @@ class SemanticOCRCorrectionClient:
         except ImportError as exc:  # pragma: no cover - dependency guidance
             raise RuntimeError("requests is required for HTTP LLM calls") from exc
 
-        endpoint = self.config.llm_endpoint.rstrip("/")
-        if not endpoint.endswith("/chat/completions"):
-            endpoint = f"{endpoint}/v1/chat/completions"
+        endpoint = self._chat_completions_url()
 
         headers = {"Content-Type": "application/json"}
         if self.config.llm_api_key:
             headers["Authorization"] = f"Bearer {self.config.llm_api_key}"
+        elif self._is_deepseek_endpoint(endpoint):
+            raise RuntimeError("DEEPSEEK_API_KEY or AGENT_LLM_API_KEY is required for DeepSeek calls")
 
         response = requests.post(
             endpoint,
@@ -69,6 +69,18 @@ class SemanticOCRCorrectionClient:
         )
         response.raise_for_status()
         return response.json()
+
+    def _chat_completions_url(self) -> str:
+        endpoint = self.config.llm_endpoint.rstrip("/")
+        if endpoint.endswith("/chat/completions"):
+            return endpoint
+        if self._is_deepseek_endpoint(endpoint):
+            return f"{endpoint}/chat/completions"
+        return f"{endpoint}/v1/chat/completions"
+
+    @staticmethod
+    def _is_deepseek_endpoint(endpoint: str) -> bool:
+        return "api.deepseek.com" in endpoint.lower()
 
     def _build_payload(
         self,
@@ -109,6 +121,9 @@ class SemanticOCRCorrectionClient:
         return {
             "model": self.config.llm_model,
             "temperature": 0,
+            "stream": False,
+            "response_format": {"type": "json_object"},
+            "max_tokens": 512,
             "messages": [
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": json.dumps(user_payload, ensure_ascii=False)},

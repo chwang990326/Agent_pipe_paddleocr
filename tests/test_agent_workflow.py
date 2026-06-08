@@ -7,6 +7,7 @@ from pathlib import Path
 
 from agent import build_default_agent
 from agent.config import AgentConfig
+from agent.integrations.llm_client import SemanticOCRCorrectionClient
 
 
 def make_config(tmp_path: Path, mock_text: str = "304L-DN500") -> AgentConfig:
@@ -24,7 +25,7 @@ def make_config(tmp_path: Path, mock_text: str = "304L-DN500") -> AgentConfig:
         alert_dry_run=True,
         simulation_endpoint=None,
         llm_endpoint=None,
-        llm_model="qwen-14b-industrial",
+        llm_model="deepseek-v4-flash",
         llm_api_key=None,
         semantic_correction_enabled=True,
         semantic_correction_required=False,
@@ -104,6 +105,25 @@ class AgentWorkflowTests(unittest.TestCase):
             self.assertTrue(state.semantic_correction.applied)
             self.assertEqual(state.material_id, "Q345B-DN500")
             self.assertEqual(state.decision.status, "matched")
+
+    def test_deepseek_endpoint_uses_official_chat_completions_path(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            config = make_config(Path(tmp))
+            config = AgentConfig(
+                **{
+                    **config.__dict__,
+                    "llm_endpoint": "https://api.deepseek.com",
+                    "llm_model": "deepseek-v4-flash",
+                    "llm_api_key": "test-key",
+                }
+            )
+
+            client = SemanticOCRCorrectionClient(config)
+
+            self.assertEqual(
+                client._chat_completions_url(),
+                "https://api.deepseek.com/chat/completions",
+            )
 
 
 if __name__ == "__main__":

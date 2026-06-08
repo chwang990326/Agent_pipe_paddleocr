@@ -68,6 +68,13 @@ class AgentConfig:
         ).resolve()
         runtime_dir = Path(os.getenv("AGENT_RUNTIME_DIR", project_root / "runtime")).resolve()
         bom_file = Path(os.getenv("AGENT_BOM_FILE", project_root / "data" / "bom.sample.json")).resolve()
+        deepseek_api_key = os.getenv("DEEPSEEK_API_KEY")
+        llm_endpoint = (
+            os.getenv("AGENT_LLM_ENDPOINT")
+            or os.getenv("DEEPSEEK_BASE_URL")
+            or ("https://api.deepseek.com" if deepseek_api_key else None)
+        )
+        llm_model = os.getenv("AGENT_LLM_MODEL") or os.getenv("DEEPSEEK_MODEL") or "deepseek-v4-flash"
 
         return cls(
             project_root=project_root,
@@ -80,9 +87,9 @@ class AgentConfig:
             alert_channel=os.getenv("AGENT_ALERT_CHANNEL", "generic").strip().lower(),
             alert_dry_run=_bool_from_env("AGENT_ALERT_DRY_RUN", True),
             simulation_endpoint=os.getenv("AGENT_SIMULATION_ENDPOINT"),
-            llm_endpoint=os.getenv("AGENT_LLM_ENDPOINT"),
-            llm_model=os.getenv("AGENT_LLM_MODEL", "qwen-14b-industrial"),
-            llm_api_key=os.getenv("AGENT_LLM_API_KEY"),
+            llm_endpoint=llm_endpoint,
+            llm_model=llm_model,
+            llm_api_key=os.getenv("AGENT_LLM_API_KEY") or deepseek_api_key,
             semantic_correction_enabled=_bool_from_env("AGENT_SEMANTIC_CORRECTION_ENABLED", True),
             semantic_correction_required=_bool_from_env("AGENT_SEMANTIC_CORRECTION_REQUIRED", False),
             semantic_correction_min_confidence=_float_from_env(
