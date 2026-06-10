@@ -10,7 +10,8 @@
 agent/
   brain.py                 # 认知中枢：任务拆解与可审计推理摘要
   controller.py            # Agent 对外门面
-  state_machine.py         # ReAct 状态机工作流
+  multi_agent.py           # Supervisor + 专家 Agent 协作编排
+  state_machine.py         # 兼容包装层，委托给 SupervisorAgent
   memory.py                # 短期去重记忆、轨迹日志、CSV 报表
   parsing.py               # 钢管字符解析与标准化
   config.py                # 环境变量配置
@@ -36,36 +37,50 @@ agent_api.py               # Flask Agent API
 
 ## 四大组件
 
-1. 认知中枢：`ControllerBrain` 与 `PipeInspectionWorkflow`
-   当前负责状态机编排、工具选择、语义纠错触发条件、BOM 核验和行动分支。LLM 不替代全部规则，而是在 OCR 边界缺陷处承担必须使用语言模型的语义纠错能力。
+1. 多 Agent 编排：`SupervisorAgent` 与专家 Agent
+   当前系统由 `SupervisorAgent` 统一接收任务并仲裁结果，下设 `PerceptionAgent`、`QualityAgent`、`RAGAgent` 和 `DispatchAgent`。LLM 不替代全部规则，而是在 OCR 语义纠错和工艺变更 RAG 审查中承担语言理解能力。
 
-2. 感知工具箱：`Tool_Read_Pipe_Text`、`Tool_Analyze_Shape`
+2. 感知 Agent：`PerceptionAgent`
+   负责调用 `Tool_Read_Pipe_Text`、`Tool_Analyze_Shape`，并完成 OCR 文本解析、材质和管径标准化。
+
+3. 质检 Agent：`QualityAgent`
+   负责 ERP/BOM 查询、BOM 比对、低置信度 OCR 的语义纠错触发和二次 BOM 校验。
+
+4. RAG Agent：`RAGAgent`
+   负责工艺变更单和质检补充通知的检索、LLM 文档审查，以及是否覆盖常规 BOM 放行规则。
+
+5. 调度 Agent：`DispatchAgent`
+   根据 `SupervisorAgent` 的最终决策执行告警、人工审核挂起或装配仿真预备。
+
+6. 感知工具箱：`Tool_Read_Pipe_Text`、`Tool_Analyze_Shape`
    OCR 工具可通过 `AGENT_OCR_ENDPOINT` 调用 Jetson TX2 上的 PaddleOCR Flask 服务。未配置 endpoint 时会返回 mock 结果，方便先跑通 Agent 闭环。
 
-3. 推理工具箱：`Tool_Semantic_OCR_Correction`
+7. 推理工具箱：`Tool_Semantic_OCR_Correction`
    当 OCR 置信度低于阈值，或 ERP/BOM 查无精确物料时，Agent 会把原始 OCR、工位、任务、形状上下文和 BOM 候选项发给 LLM。LLM 必须返回结构化 JSON：是否应用纠错、纠正后的物料号、置信度、解释摘要和候选项。纠错置信度达标后，Agent 才会用纠正后的物料号重新查 BOM。
 
-4. 行动工具箱：`Tool_Query_ERP`、`Tool_Trigger_Alert`、`Tool_Prepare_Assembly_Simulation`
+8. 行动工具箱：`Tool_Query_ERP`、`Tool_Trigger_Alert`、`Tool_Prepare_Assembly_Simulation`
    ERP/MES 未接入时读取 `data/bom.sample.json`。告警默认 dry-run，不会真正发送；配置飞书或钉钉 webhook 后可切换为实发。
 
-5. 记忆与持久化：`AgentMemory`
+9. 记忆与持久化：`AgentMemory`
    短期记忆记录当前批次/工位识别过的构件签名，避免同一构件被重复识别和重复报错。长期数据写入 JSONL 轨迹和 CSV 批次报表。
 
 ## ReAct 状态机轨迹
 
 ```text
 triggered
-  -> perception: Tool_Read_Pipe_Text, Tool_Analyze_Shape
-  -> reasoning: ControllerBrain 生成计划与推理摘要
-  -> validation: Tool_Query_ERP
+  -> SupervisorAgent 接收任务
+  -> PerceptionAgent: Tool_Read_Pipe_Text, Tool_Analyze_Shape
+  -> SupervisorAgent: ControllerBrain 生成计划与推理摘要
+  -> QualityAgent: Tool_Query_ERP
   -> reasoning conditional:
        low_confidence or erp_not_found
        -> Tool_Semantic_OCR_Correction
        -> corrected_text accepted
-       -> Tool_Query_ERP again
-  -> agentic rag:
-       Tool_Process_Change_RAG_Check reviews latest process-change documents
-  -> decision:
+       -> QualityAgent 二次查询 BOM
+  -> RAGAgent:
+       Tool_Process_Change_RAG_Check 审查最新工艺变更文档
+  -> SupervisorAgent final decision
+  -> DispatchAgent:
        matched  -> Tool_Prepare_Assembly_Simulation -> finished
        blocked_by_process_change -> Tool_Trigger_Alert -> suspended_for_human_review
        mismatch -> Tool_Trigger_Alert -> suspended_for_human_review

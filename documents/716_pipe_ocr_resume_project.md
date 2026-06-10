@@ -6,20 +6,20 @@
 **所属单位：** 中船 716 所  
 **项目周期：** 2025.03 - 2025.10  
 **目标岗位：** AI Agent 开发工程师 / LLM 应用开发工程师 / 工业智能体开发工程师  
-**技术栈：** Python、PaddleOCR、PaddlePaddle、Flask、OpenCV、DeepSeek-V4-Flash、ReAct、Agentic RAG、状态机、Tool Calling、ERP/BOM 校验、JSONL/CSV 持久化、Git/GitHub、NVIDIA Jetson TX2、CUDA 11.8、cuDNN 8.9
+**技术栈：** Python、PaddleOCR、PaddlePaddle、Flask、OpenCV、DeepSeek-V4-Flash、Multi-Agent、ReAct、Agentic RAG、状态机、Tool Calling、ERP/BOM 校验、JSONL/CSV 持久化、Git/GitHub、NVIDIA Jetson TX2、CUDA 11.8、cuDNN 8.9
 
 **项目简介：**  
-该项目面向船舶制造场景下钢管等中大型构件的智能质检需求，在原有 PaddleOCR 视觉识别能力基础上，进一步重构为具备“感知、推理、校验、行动、记忆”的工业质检 Agent。系统将 OCR 字符识别、形状分析、ERP/BOM 查询、工艺变更 RAG 审查、告警通知和装配仿真预备封装为可调用 Tools，并基于 ReAct 状态机编排 Agent 执行链路。针对工业现场手写字符潦草、OCR 低置信度、物料号易混淆等问题，引入 DeepSeek-V4-Flash 作为语义级 OCR 纠错模型；同时构建轻量级 Agentic RAG，在 BOM 校验通过后动态检索最新工艺变更单、质检补充通知等非结构化文档，判断是否需要复检、禁装或人工审核。
+该项目面向船舶制造场景下钢管等中大型构件的智能质检需求，在原有 PaddleOCR 视觉识别能力基础上，进一步重构为具备“感知、推理、校验、行动、记忆”的工业质检 Multi-Agent 系统。系统由 SupervisorAgent 统一编排，拆分出 PerceptionAgent、QualityAgent、RAGAgent 和 DispatchAgent，分别负责视觉感知、BOM 质检、工艺文档审查和动作调度。系统将 OCR 字符识别、形状分析、ERP/BOM 查询、工艺变更 RAG 审查、告警通知和装配仿真预备封装为可调用 Tools，并基于 ReAct 状态机编排执行链路。针对工业现场手写字符潦草、OCR 低置信度、物料号易混淆等问题，引入 DeepSeek-V4-Flash 作为语义级 OCR 纠错模型；同时构建轻量级 Agentic RAG，在 BOM 校验通过后动态检索最新工艺变更单、质检补充通知等非结构化文档，判断是否需要复检、禁装或人工审核。
 
 ## 简历压缩版
 
 **连云港中船 716 所钢管文字与形状识别智能质检 Agent | 2025.03 - 2025.10**  
-基于 PaddleOCR、Flask、DeepSeek-V4-Flash、Agentic RAG 和 ReAct 状态机，将传统工业 OCR 识别系统重构为具备感知、推理、校验、告警和记忆能力的工业质检 Agent。负责设计 Agent 核心架构，将 OCR 识别、形状分析、ERP/BOM 查询、工艺变更 RAG 审查、异常告警和装配仿真预备封装为标准化 Tools；实现基于状态机的 ReAct 工作流，支持“识别构件 -> 查询 BOM -> 检索非结构化工艺文档 -> 条件决策 -> 一致放行/异常告警/人工审核挂起”的闭环。针对手写字符潦草、`O/0`、`Q/0`、`DN5OO/DN500` 等工业 OCR 易混淆问题，接入 DeepSeek-V4-Flash 构建语义级 OCR 纠错工具；针对临时工艺变更单、质检补充通知等非结构化文件，构建轻量 RAG 审查链路，使 Agent 能在 BOM 通过后继续读取最新文档并动态拦截风险物料。实现短期去重记忆、轨迹 JSONL 记录和 CSV 报表文本化导出，避免重复告警和物料编号科学计数法失真。
+基于 PaddleOCR、Flask、DeepSeek-V4-Flash、Agentic RAG 和 ReAct 状态机，将传统工业 OCR 识别系统重构为具备感知、推理、校验、告警和记忆能力的工业质检 Multi-Agent。负责设计 Supervisor + 专家 Agent 架构，将系统拆分为 PerceptionAgent、QualityAgent、RAGAgent 和 DispatchAgent，并将 OCR 识别、形状分析、ERP/BOM 查询、工艺变更 RAG 审查、异常告警和装配仿真预备封装为标准化 Tools；实现“识别构件 -> 查询 BOM -> 检索非结构化工艺文档 -> 条件决策 -> 一致放行/异常告警/人工审核挂起”的闭环。针对手写字符潦草、`O/0`、`Q/0`、`DN5OO/DN500` 等工业 OCR 易混淆问题，接入 DeepSeek-V4-Flash 构建语义级 OCR 纠错工具；针对临时工艺变更单、质检补充通知等非结构化文件，构建轻量 RAG 审查链路，使 Agent 能在 BOM 通过后继续读取最新文档并动态拦截风险物料。实现短期去重记忆、轨迹 JSONL 记录和 CSV 报表文本化导出，避免重复告警和物料编号科学计数法失真。
 
 ## 个人职责
 
-1. 负责将原有 PaddleOCR 视觉识别系统重构为工业质检 Agent 架构，完成从“被动识别 API”到“主动决策智能体”的项目升级。
-2. 设计 Agent 四层架构：认知中枢、感知工具箱、行动工具箱、记忆与持久化模块，实现模块解耦和工具化调用。
+1. 负责将原有 PaddleOCR 视觉识别系统重构为工业质检 Multi-Agent 架构，完成从“被动识别 API”到“主动决策智能体”的项目升级。
+2. 设计 Supervisor + 专家 Agent 架构，将系统拆分为 PerceptionAgent、QualityAgent、RAGAgent 和 DispatchAgent，实现职责隔离、可审计协作和工具化调用。
 3. 基于 ReAct 思路设计状态机工作流，编排 `Trigger -> Perception -> Reasoning -> Validation -> Decision -> Action` 的完整执行轨迹。
 4. 将 OCR 文字识别、形状识别、ERP/BOM 查询、飞书/钉钉告警、装配仿真预备等能力封装为 Agent Tools，统一工具输入输出协议。
 5. 接入 DeepSeek-V4-Flash，设计语义级 OCR 纠错工具 `Tool_Semantic_OCR_Correction`，用于低置信度 OCR 或 ERP 查无物料场景。
@@ -221,16 +221,16 @@ LLM 只负责语义 OCR 纠错这类规则难以覆盖的局部任务；
 
 ## 面试讲法
 
-面试官如果问“这个项目为什么算 Agent”，可以这样回答：
+面试官如果问“这个项目为什么算 Multi-Agent”，可以这样回答：
 
 ```text
 原来的系统只是一个 OCR API，输入图片，输出识别结果，本质上是被动感知。
-我后续把它重构成了一个工业质检 Agent：
-第一，它有工具系统，把 OCR、形状识别、ERP 查询、告警和仿真接口都封装成 Tool；
-第二，它有状态机工作流，能够根据不同状态主动决定下一步调用哪个工具；
-第三，它有 LLM 推理能力，在 OCR 低置信度或 BOM 查无物料时调用 DeepSeek 做语义级纠错；
-第四，它有记忆和持久化，能够避免重复识别，并记录每一次决策轨迹。
-所以它不只是识别模型，而是一个能感知、推理、校验和行动的工业 Agent。
+我后续把它重构成了一个工业质检 Multi-Agent：
+第一，SupervisorAgent 统一接收任务并做最终仲裁；
+第二，PerceptionAgent 负责 OCR 和形状识别，QualityAgent 负责 BOM 校验和语义纠错，RAGAgent 负责工艺变更文档审查，DispatchAgent 负责告警和仿真调度；
+第三，各 Agent 通过结构化状态对象传递中间结果，底层能力全部封装为 Tools；
+第四，它具备记忆和持久化能力，能够避免重复识别，并记录每一次协作和决策轨迹。
+所以它不是单次 OCR 推理，而是多个专家 Agent 协作完成感知、推理、校验、审查和行动的工业智能体系统。
 ```
 
 面试官如果问“为什么要用 LLM”，可以这样回答：
@@ -268,4 +268,4 @@ Agent 会根据 RAG 审查结果覆盖常规放行路径，触发告警并挂起
 ## 推荐投递版本
 
 **连云港中船 716 所钢管文字与形状识别智能质检 Agent | AI Agent 开发 | 2025.03 - 2025.10**  
-基于 PaddleOCR、Flask、DeepSeek-V4-Flash、Agentic RAG 和 ReAct 状态机，将船舶制造场景下的钢管文字与形状识别系统重构为工业质检 Agent。负责 Agent 架构设计与核心链路开发，将 OCR 识别、形状分析、ERP/BOM 查询、工艺变更 RAG 审查、异常告警和装配仿真预备封装为可调用 Tools，并通过状态机实现“感知 -> 推理 -> 校验 -> 文档审查 -> 决策 -> 行动”的闭环。针对手写字符潦草和工业编码易混淆问题，设计 LLM 语义级 OCR 纠错工具，接入 DeepSeek-V4-Flash，结合 BOM 候选项、冶金材料牌号和工位上下文输出结构化纠错结果；针对临时工艺变更单和质检补充通知，构建轻量 RAG 审查链路，使 Agent 能在 BOM 通过后继续读取最新非结构化文档并动态拦截复检/禁装物料。同时实现短期去重记忆、Agent 轨迹 JSONL 持久化和 CSV 报表文本化导出，支持异常告警与人工审核挂起。
+基于 PaddleOCR、Flask、DeepSeek-V4-Flash、Agentic RAG 和 ReAct 状态机，将船舶制造场景下的钢管文字与形状识别系统重构为工业质检 Multi-Agent。负责 Supervisor + 专家 Agent 架构设计与核心链路开发，将 OCR 识别、形状分析、ERP/BOM 查询、工艺变更 RAG 审查、异常告警和装配仿真预备封装为可调用 Tools，并由 PerceptionAgent、QualityAgent、RAGAgent、DispatchAgent 协作实现“感知 -> 推理 -> 校验 -> 文档审查 -> 决策 -> 行动”的闭环。针对手写字符潦草和工业编码易混淆问题，设计 LLM 语义级 OCR 纠错工具，接入 DeepSeek-V4-Flash，结合 BOM 候选项、冶金材料牌号和工位上下文输出结构化纠错结果；针对临时工艺变更单和质检补充通知，构建轻量 RAG 审查链路，使 Agent 能在 BOM 通过后继续读取最新非结构化文档并动态拦截复检/禁装物料。同时实现短期去重记忆、Agent 轨迹 JSONL 持久化和 CSV 报表文本化导出，支持异常告警与人工审核挂起。

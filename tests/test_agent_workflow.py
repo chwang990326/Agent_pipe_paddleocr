@@ -57,6 +57,11 @@ class AgentWorkflowTests(unittest.TestCase):
 
             self.assertEqual(state.decision.status, "matched")
             self.assertEqual(state.decision.action, "prepare_assembly_simulation")
+            actions = [event.action for event in state.trace]
+            self.assertIn("SupervisorAgent.received_task", actions)
+            self.assertIn("PerceptionAgent.start", actions)
+            self.assertIn("QualityAgent.start", actions)
+            self.assertIn("DispatchAgent.received_decision", actions)
 
     def test_mismatch_path_triggers_alert(self):
         with tempfile.TemporaryDirectory() as tmp:
