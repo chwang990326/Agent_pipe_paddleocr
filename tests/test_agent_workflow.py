@@ -6,8 +6,12 @@ import unittest
 from pathlib import Path
 
 from agent import build_default_agent
+from agent.brain import ControllerBrain
 from agent.config import AgentConfig
 from agent.integrations.llm_client import SemanticOCRCorrectionClient
+from agent.memory import AgentMemory
+from agent.state_machine import PipeInspectionWorkflow
+from agent.tools.registry import build_tool_registry
 
 
 def make_config(tmp_path: Path, mock_text: str = "304L-DN500") -> AgentConfig:
@@ -35,6 +39,11 @@ def make_config(tmp_path: Path, mock_text: str = "304L-DN500") -> AgentConfig:
         process_rag_docs_dir=project_root / "data" / "process_docs",
         process_rag_top_k=4,
         process_rag_min_confidence=0.70,
+        incident_investigation_enabled=False,
+        incident_investigation_required=False,
+        incident_investigation_window_size=10,
+        incident_investigation_min_anomalies=3,
+        incident_investigation_min_confidence=0.70,
         http_timeout_seconds=1.0,
         min_ocr_confidence=0.75,
         mock_ocr_text=mock_text,
@@ -62,6 +71,7 @@ class AgentWorkflowTests(unittest.TestCase):
             self.assertIn("PerceptionAgent.start", actions)
             self.assertIn("QualityAgent.start", actions)
             self.assertIn("DispatchAgent.received_decision", actions)
+            self.assertIn("SupervisorAgent.plan_created", actions)
 
     def test_mismatch_path_triggers_alert(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -157,6 +167,52 @@ class AgentWorkflowTests(unittest.TestCase):
             self.assertTrue(state.process_change_review.blocked)
             self.assertEqual(state.decision.status, "blocked_by_process_change")
             self.assertEqual(state.decision.action, "send_to_reinspection")
+
+    def test_incident_investigation_triggers_after_repeated_anomalies(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base_config = make_config(Path(tmp), mock_text="316L-DN500")
+            config = AgentConfig(
+                **{
+                    **base_config.__dict__,
+                    "llm_endpoint": "mock://process-rag",
+                    "process_rag_enabled": True,
+                    "incident_investigation_enabled": True,
+                }
+            )
+            agent = build_default_agent(config)
+
+            agent.inspect_pipe(
+                task="inspect 7 dock seawater cooling pipeline",
+                workstation="A-04",
+                component_id="incident-001",
+            )
+            agent.inspect_pipe(
+                task="inspect 7 dock seawater cooling pipeline",
+                workstation="A-04",
+                component_id="incident-002",
+            )
+            state = agent.inspect_pipe(
+                task="inspect 7 dock seawater cooling pipeline",
+                workstation="A-04",
+                component_id="incident-003",
+            )
+
+            self.assertIsNotNone(state.incident_investigation)
+            self.assertTrue(state.incident_investigation.triggered)
+            self.assertEqual(state.incident_investigation.severity, "high")
+            self.assertGreaterEqual(len(state.incident_investigation.recommended_actions), 1)
+
+    def test_workflow_builds_langgraph_graph(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            config = make_config(Path(tmp))
+            workflow = PipeInspectionWorkflow(
+                config=config,
+                tools=build_tool_registry(),
+                memory=AgentMemory(config),
+                brain=ControllerBrain(),
+            )
+
+            self.assertIsNotNone(workflow.graph)
 
 
 if __name__ == "__main__":

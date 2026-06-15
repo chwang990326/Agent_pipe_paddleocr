@@ -86,6 +86,19 @@ class ProcessChangeReviewResult:
 
 
 @dataclass
+class IncidentInvestigationResult:
+    triggered: bool
+    severity: str
+    confidence: float
+    incident_summary: str
+    root_cause_summary: str
+    hypotheses: list[str] = field(default_factory=list)
+    evidence: list[dict[str, Any]] = field(default_factory=list)
+    recommended_actions: list[str] = field(default_factory=list)
+    raw: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
 class AgentDecision:
     status: str
     action: str
@@ -113,6 +126,7 @@ class PipeInspectionState:
     erp_record: ERPRecord | None = None
     semantic_correction: SemanticCorrectionResult | None = None
     process_change_review: ProcessChangeReviewResult | None = None
+    incident_investigation: IncidentInvestigationResult | None = None
     decision: AgentDecision | None = None
     trace: list[TraceEvent] = field(default_factory=list)
 
@@ -125,6 +139,24 @@ class PipeInspectionState:
                 action=action,
                 observation=observation or {},
             )
+        )
+
+    @classmethod
+    def create(
+        cls,
+        task: str,
+        workstation: str,
+        component_id: str | None = None,
+        batch_id: str | None = None,
+        frame_path: str | None = None,
+    ) -> "PipeInspectionState":
+        return cls(
+            run_id=new_id("run"),
+            task=task,
+            workstation=workstation,
+            component_id=component_id or new_id("component"),
+            batch_id=batch_id or new_id("batch"),
+            frame_path=frame_path,
         )
 
 

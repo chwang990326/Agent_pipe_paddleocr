@@ -4,11 +4,14 @@ from __future__ import annotations
 
 from agent.brain import ControllerBrain
 from agent.config import AgentConfig
+from agent.integrations.incident_client import IncidentInvestigationClient
+from agent.integrations.process_docs import ProcessDocumentRetriever
 from agent.memory import AgentMemory
 from agent.parsing import normalize_material_id, parse_pipe_text
 from agent.schemas import (
     AgentDecision,
     ERPRecord,
+    IncidentInvestigationResult,
     OCRResult,
     PipeInspectionState,
     ProcessChangeReviewResult,
@@ -420,6 +423,185 @@ class DispatchAgent:
         return "Pipe BOM mismatch"
 
 
+class IncidentInvestigationAgent:
+    """Runs multi-round investigation when the same workstation keeps failing."""
+
+    name = "IncidentInvestigationAgent"
+    abnormal_statuses = {"mismatch", "needs_review", "blocked_by_process_change", "error"}
+
+    def __init__(self, config: AgentConfig, tools: dict[str, object], memory: AgentMemory):
+        self.config = config
+        self.tools = tools
+        self.memory = memory
+
+    def run(self, state: PipeInspectionState, context: ToolContext) -> IncidentInvestigationResult | None:
+        if not self.config.incident_investigation_enabled:
+            return None
+
+        if not state.decision or state.decision.status not in self.abnormal_statuses:
+            return None
+
+        recent_events = self._recent_event_summaries(state)
+        current_event = self._event_summary(state)
+        abnormal_count = self._abnormal_count([*recent_events, current_event])
+        if abnormal_count < self.config.incident_investigation_min_anomalies:
+            state.add_trace(
+                "reasoning",
+                "IncidentInvestigationAgent.skipped",
+                {
+                    "reason": "abnormal_count_below_threshold",
+                    "abnormal_count": abnormal_count,
+                    "threshold": self.config.incident_investigation_min_anomalies,
+                },
+            )
+            return None
+
+        if not self.config.llm_endpoint:
+            message = "Incident investigation was triggered but AGENT_LLM_ENDPOINT is not configured"
+            if self.config.incident_investigation_required:
+                raise RuntimeError(message)
+            state.add_trace(
+                "reasoning",
+                "IncidentInvestigationAgent.skipped",
+                {"reason": message, "required": False},
+            )
+            return None
+
+        evidence = self._collect_evidence(state, recent_events, abnormal_count)
+        state.add_trace(
+            "reasoning",
+            "IncidentInvestigationAgent.start",
+            {
+                "recent_events": len(recent_events),
+                "abnormal_count": abnormal_count,
+                "evidence_count": len(evidence),
+            },
+        )
+        result = IncidentInvestigationClient(self.config).investigate(
+            current_event=current_event,
+            recent_events=recent_events,
+            evidence=evidence,
+        )
+        state.incident_investigation = result
+        state.add_trace(
+            "reasoning",
+            "IncidentInvestigationAgent.result",
+            {
+                "triggered": result.triggered,
+                "severity": result.severity,
+                "confidence": result.confidence,
+                "root_cause_summary": result.root_cause_summary,
+            },
+        )
+
+        if result.triggered and result.confidence >= self.config.incident_investigation_min_confidence:
+            alert_result = self.tools["Tool_Trigger_Alert"].run(
+                {
+                    "title": "Production incident investigation",
+                    "message": result.root_cause_summary,
+                    "details": {
+                        "run_id": state.run_id,
+                        "workstation": state.workstation,
+                        "material_id": state.material_id,
+                        "severity": result.severity,
+                        "incident_summary": result.incident_summary,
+                        "hypotheses": result.hypotheses,
+                        "recommended_actions": result.recommended_actions,
+                    },
+                },
+                context,
+            )
+            state.add_trace("action", "IncidentInvestigationAgent.Trigger_Alert", alert_result.data)
+
+        return result
+
+    def _recent_event_summaries(self, state: PipeInspectionState) -> list[dict]:
+        records = self.memory.recent_states(
+            workstation=state.workstation,
+            limit=self.config.incident_investigation_window_size,
+        )
+        return [self._record_summary(record) for record in records]
+
+    def _event_summary(self, state: PipeInspectionState) -> dict:
+        return {
+            "run_id": state.run_id,
+            "timestamp": state.finished_at or now_iso(),
+            "workstation": state.workstation,
+            "batch_id": state.batch_id,
+            "component_id": state.component_id,
+            "material_id": state.material_id,
+            "ocr_confidence": state.ocr_result.confidence if state.ocr_result else None,
+            "decision_status": state.decision.status if state.decision else "",
+            "decision_action": state.decision.action if state.decision else "",
+            "reason_summary": state.decision.reason_summary if state.decision else "",
+            "process_rag_blocked": state.process_change_review.blocked if state.process_change_review else False,
+        }
+
+    def _record_summary(self, record: dict) -> dict:
+        decision = record.get("decision") or {}
+        ocr = record.get("ocr_result") or {}
+        process_review = record.get("process_change_review") or {}
+        return {
+            "run_id": record.get("run_id"),
+            "timestamp": record.get("finished_at") or record.get("started_at"),
+            "workstation": record.get("workstation"),
+            "batch_id": record.get("batch_id"),
+            "component_id": record.get("component_id"),
+            "material_id": record.get("material_id"),
+            "ocr_confidence": ocr.get("confidence"),
+            "decision_status": decision.get("status", ""),
+            "decision_action": decision.get("action", ""),
+            "reason_summary": decision.get("reason_summary", ""),
+            "process_rag_blocked": process_review.get("blocked", False),
+        }
+
+    def _abnormal_count(self, events: list[dict]) -> int:
+        return len(
+            [event for event in events if event.get("decision_status") in self.abnormal_statuses]
+        )
+
+    def _collect_evidence(
+        self,
+        state: PipeInspectionState,
+        recent_events: list[dict],
+        abnormal_count: int,
+    ) -> list[dict]:
+        evidence = [
+            {
+                "type": "recent_abnormal_statistics",
+                "workstation": state.workstation,
+                "window_size": self.config.incident_investigation_window_size,
+                "abnormal_count": abnormal_count,
+                "recent_events": recent_events,
+            },
+            {
+                "type": "current_erp_record",
+                "record": to_plain_data(state.erp_record) if state.erp_record else {},
+            },
+            {
+                "type": "current_process_change_review",
+                "review": to_plain_data(state.process_change_review) if state.process_change_review else {},
+            },
+        ]
+
+        retrieved_docs = ProcessDocumentRetriever(self.config).retrieve(
+            material_id=state.material_id,
+            material=state.parsed_material,
+            diameter=state.parsed_diameter,
+            workstation=state.workstation,
+            task=state.task,
+            top_k=3,
+        )
+        if retrieved_docs:
+            evidence.append(
+                {
+                    "type": "relevant_process_documents",
+                    "documents": [to_plain_data(doc) for doc in retrieved_docs],
+                }
+            )
+        return evidence
+
+
 class SupervisorAgent:
     """Coordinates specialist agents and owns final arbitration."""
 
@@ -439,6 +621,7 @@ class SupervisorAgent:
         self.quality_agent = QualityAgent(config, tools)
         self.rag_agent = RAGAgent(config, tools)
         self.dispatch_agent = DispatchAgent(tools)
+        self.incident_agent = IncidentInvestigationAgent(config, tools, memory)
 
     def run(
         self,
@@ -484,6 +667,7 @@ class SupervisorAgent:
 
             decision = self.rag_agent.run(state, context, decision)
             self.dispatch_agent.run(state, context, decision)
+            self.incident_agent.run(state, context)
             self.memory.remember(signature, state)
             return self._finish(state)
         except Exception as exc:  # pragma: no cover - top-level safety net

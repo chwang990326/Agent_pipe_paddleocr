@@ -38,6 +38,11 @@ class AgentMemory:
         "process_rag_action",
         "process_rag_confidence",
         "process_rag_citations",
+        "incident_triggered",
+        "incident_severity",
+        "incident_confidence",
+        "incident_root_cause",
+        "incident_actions",
         "erp_material_id",
         "decision_status",
         "action",
@@ -69,6 +74,24 @@ class AgentMemory:
         with self.config.trace_file.open("a", encoding="utf-8") as trace_file:
             trace_file.write(json.dumps(to_plain_data(state), ensure_ascii=False) + "\n")
         self._append_report(state)
+
+    def recent_states(self, workstation: str | None = None, limit: int = 10) -> list[dict[str, Any]]:
+        path = self.config.trace_file
+        if not path.exists():
+            return []
+
+        records = []
+        for line in path.read_text(encoding="utf-8").splitlines():
+            if not line.strip():
+                continue
+            try:
+                record = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if workstation and record.get("workstation") != workstation:
+                continue
+            records.append(record)
+        return records[-limit:]
 
     def _load_short_term(self) -> dict[str, ShortTermEntry]:
         path = self.config.short_term_file
@@ -110,6 +133,7 @@ class AgentMemory:
         shape = state.shape_result
         correction = state.semantic_correction
         process_review = state.process_change_review
+        incident = state.incident_investigation
         row: dict[str, Any] = {
             "timestamp": state.finished_at or now_iso(),
             "run_id": state.run_id,
@@ -131,6 +155,15 @@ class AgentMemory:
             "process_rag_citations": (
                 "; ".join(doc.title for doc in process_review.citations)
                 if process_review
+                else ""
+            ),
+            "incident_triggered": incident.triggered if incident else "",
+            "incident_severity": incident.severity if incident else "",
+            "incident_confidence": f"{incident.confidence:.4f}" if incident else "",
+            "incident_root_cause": incident.root_cause_summary if incident else "",
+            "incident_actions": (
+                "; ".join(incident.recommended_actions)
+                if incident
                 else ""
             ),
             "erp_material_id": erp.material_id if erp else "",

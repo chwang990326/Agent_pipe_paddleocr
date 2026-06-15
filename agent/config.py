@@ -58,6 +58,11 @@ class AgentConfig:
     process_rag_docs_dir: Path
     process_rag_top_k: int
     process_rag_min_confidence: float
+    incident_investigation_enabled: bool
+    incident_investigation_required: bool
+    incident_investigation_window_size: int
+    incident_investigation_min_anomalies: int
+    incident_investigation_min_confidence: float
     http_timeout_seconds: float
     min_ocr_confidence: float
     mock_ocr_text: str
@@ -108,6 +113,18 @@ class AgentConfig:
             ).resolve(),
             process_rag_top_k=int(os.getenv("AGENT_PROCESS_RAG_TOP_K", "4")),
             process_rag_min_confidence=_float_from_env("AGENT_PROCESS_RAG_MIN_CONFIDENCE", 0.70),
+            incident_investigation_enabled=_bool_from_env("AGENT_INCIDENT_INVESTIGATION_ENABLED", True),
+            incident_investigation_required=_bool_from_env("AGENT_INCIDENT_INVESTIGATION_REQUIRED", False),
+            incident_investigation_window_size=int(
+                os.getenv("AGENT_INCIDENT_INVESTIGATION_WINDOW_SIZE", "10")
+            ),
+            incident_investigation_min_anomalies=int(
+                os.getenv("AGENT_INCIDENT_INVESTIGATION_MIN_ANOMALIES", "3")
+            ),
+            incident_investigation_min_confidence=_float_from_env(
+                "AGENT_INCIDENT_INVESTIGATION_MIN_CONFIDENCE",
+                0.70,
+            ),
             http_timeout_seconds=_float_from_env("AGENT_HTTP_TIMEOUT_SECONDS", 10.0),
             min_ocr_confidence=_float_from_env("AGENT_MIN_OCR_CONFIDENCE", 0.75),
             mock_ocr_text=os.getenv("AGENT_MOCK_OCR_TEXT", "304L-DN500"),
